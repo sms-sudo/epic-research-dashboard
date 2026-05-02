@@ -18,11 +18,24 @@ STORAGE_FILE = "user_data.json"
 def load_data():
     with open("epic_tables_parsed.json", "r", encoding='utf-8') as f:
         return json.load(f)
-
 def load_user_data():
     if os.path.exists(STORAGE_FILE):
         with open(STORAGE_FILE, "r") as f:
-            return json.load(f)
+            try:
+                data = json.load(f)
+                # --- REPAIR LOGIC START ---
+                # If the file exists but is missing new keys, add them here
+                if "favorites" not in data:
+                    data["favorites"] = []
+                if "history" not in data:
+                    data["history"] = []
+                if "chat_sessions" not in data:
+                    data["chat_sessions"] = {}
+                # --- REPAIR LOGIC END ---
+                return data
+            except json.JSONDecodeError:
+                # If the file is corrupted, return default
+                return {"favorites": [], "history": [], "chat_sessions": {}}
     return {"favorites": [], "history": [], "chat_sessions": {}}
 
 def save_user_data(data_to_save):
@@ -38,10 +51,12 @@ table_descriptions = {t['tableName']: t.get('description', 'No description avail
 if 'active_page' not in st.session_state:
     st.session_state['active_page'] = "Table Explorer"
 if 'current_chat_id' not in st.session_state:
-    # Set to a default or the first existing session
-    if user_data["chat_sessions"]:
+    # Use the repaired user_data from the function above
+    if user_data.get("chat_sessions"):
         st.session_state['current_chat_id'] = list(user_data["chat_sessions"].keys())[0]
     else:
+        # Create a default session if absolutely none exist
+        import uuid
         new_id = str(uuid.uuid4())
         user_data["chat_sessions"][new_id] = {"name": "New Research Chat", "messages": []}
         st.session_state['current_chat_id'] = new_id
