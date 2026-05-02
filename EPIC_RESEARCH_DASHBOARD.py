@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import os
 
-# --- 1. CONFIGURATION (Must be the very first Streamlit command) ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(
     layout="wide", 
     page_title="Epic Research Schema Explorer",
@@ -35,9 +35,25 @@ table_list = sorted([t['tableName'] for t in data])
 user_data = load_user_data()
 table_descriptions = {t['tableName']: t.get('description', 'No description available.') for t in data}
 
-# --- 3. NAVIGATION ---
+# --- 3. PAGE NAVIGATION STATE ---
+if 'active_page' not in st.session_state:
+    st.session_state['active_page'] = "Table Explorer"
+
+# Navigation Buttons in Sidebar
 st.sidebar.title("🧭 Navigation")
-app_mode = st.sidebar.radio("Go to:", ["Table Explorer", "RAG Model"])
+col_nav1, col_nav2 = st.sidebar.columns(2)
+
+if col_nav1.button("Explorer", 
+                   type="primary" if st.session_state['active_page'] == "Table Explorer" else "secondary",
+                   use_container_width=True):
+    st.session_state['active_page'] = "Table Explorer"
+    st.rerun()
+
+if col_nav2.button("RAG Model", 
+                   type="primary" if st.session_state['active_page'] == "RAG Model" else "secondary",
+                   use_container_width=True):
+    st.session_state['active_page'] = "RAG Model"
+    st.rerun()
 
 # --- 4. SESSION STATE & HELPERS ---
 if 'current_table' not in st.session_state:
@@ -57,7 +73,7 @@ def set_table(table_name):
 # ==========================================
 # PAGE 1: TABLE EXPLORER
 # ==========================================
-if app_mode == "Table Explorer":
+if st.session_state['active_page'] == "Table Explorer":
     st.sidebar.divider()
     st.sidebar.header("📂 Table Selection")
 
@@ -76,7 +92,7 @@ if app_mode == "Table Explorer":
     if selected_table_name != st.session_state['current_table']:
         set_table(selected_table_name)
 
-    # Favorites & History
+    # Favorites & History (Sidebar)
     st.sidebar.divider()
     st.sidebar.header("⭐️ Favorites")
     if user_data["favorites"]:
@@ -112,7 +128,7 @@ if app_mode == "Table Explorer":
             st.title(f"Table: {table_obj['tableName']}")
         with c2:
             is_fav = table_obj['tableName'] in user_data["favorites"]
-            if st.button("❤️ Unfavourite" if is_fav else "🤍 Add Favourite"):
+            if st.button("❤️ Unfavourite" if is_fav else "🤍 Add Favourite", use_container_width=True):
                 if is_fav: user_data["favorites"].remove(table_obj['tableName'])
                 else: user_data["favorites"].append(table_obj['tableName'])
                 save_user_data(user_data)
@@ -150,7 +166,7 @@ if app_mode == "Table Explorer":
 # ==========================================
 # PAGE 2: RAG MODEL
 # ==========================================
-elif app_mode == "RAG Model":
+elif st.session_state['active_page'] == "RAG Model":
     st.title("🤖 RAG Research Model")
     st.markdown("Analyze your research question to find the best data paths.")
     
@@ -159,15 +175,15 @@ elif app_mode == "RAG Model":
         if st.button("Generate Data Recommendations", type="primary"):
             st.divider()
             st.subheader("Top Recommended Tables")
-            # Simple semantic mock-up logic
+            # Simple keyword mock-up
             matches = [t for t in data if any(word.lower() in t['description'].lower() for word in query.split() if len(word) > 3)]
             if matches:
                 for m in matches[:5]:
                     with st.expander(f"Table: {m['tableName']}"):
                         st.write(m['description'])
-                        if st.button(f"View {m['tableName']}", key=f"rag_nav_{m['tableName']}"):
+                        if st.button(f"View {m['tableName']} in Explorer", key=f"rag_nav_{m['tableName']}"):
                             st.session_state['current_table'] = m['tableName']
-                            # Note: To fully switch pages, user would manually select 'Table Explorer'
-                            st.success(f"Selected {m['tableName']}. Switch to 'Table Explorer' to view details.")
+                            st.session_state['active_page'] = "Table Explorer"
+                            st.rerun()
             else:
                 st.warning("No high-confidence matches found.")
