@@ -136,4 +136,38 @@ if app_mode == "Table Explorer":
         with tab2:
             st.subheader("Tie-back Finder")
             def find_related(col_name):
-                return sorted(list(set(t['tableName'] for t in data if t['tableName'] != st.session_state['current_table'] and any(c['name
+                return sorted(list(set(t['tableName'] for t in data if t['tableName'] != st.session_state['current_table'] and any(c['name'].upper() == col_name.upper() for c in t['columns']))))
+            
+            cols_to_check = sorted([c['name'] for c in table_obj['columns']], key=lambda x: ("ID" not in x, x))
+            for col_name in cols_to_check:
+                related_tables = find_related(col_name)
+                if related_tables:
+                    with st.expander(f"{col_name} ({len(related_tables)} tables)"):
+                        r_cols = st.columns(3)
+                        for i, r_table in enumerate(related_tables):
+                            r_cols[i % 3].button(r_table, key=f"rel_{col_name}_{r_table}", on_click=set_table, args=(r_table,), help=table_descriptions.get(r_table))
+
+# ==========================================
+# PAGE 2: RAG MODEL
+# ==========================================
+elif app_mode == "RAG Model":
+    st.title("🤖 RAG Research Model")
+    st.markdown("Analyze your research question to find the best data paths.")
+    
+    with st.container(border=True):
+        query = st.text_area("Enter your research idea:", height=150, placeholder="e.g. Impact of SDOH on Readmission rates...")
+        if st.button("Generate Data Recommendations", type="primary"):
+            st.divider()
+            st.subheader("Top Recommended Tables")
+            # Simple semantic mock-up logic
+            matches = [t for t in data if any(word.lower() in t['description'].lower() for word in query.split() if len(word) > 3)]
+            if matches:
+                for m in matches[:5]:
+                    with st.expander(f"Table: {m['tableName']}"):
+                        st.write(m['description'])
+                        if st.button(f"View {m['tableName']}", key=f"rag_nav_{m['tableName']}"):
+                            st.session_state['current_table'] = m['tableName']
+                            # Note: To fully switch pages, user would manually select 'Table Explorer'
+                            st.success(f"Selected {m['tableName']}. Switch to 'Table Explorer' to view details.")
+            else:
+                st.warning("No high-confidence matches found.")
