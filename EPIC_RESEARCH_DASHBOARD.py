@@ -2,9 +2,9 @@ import streamlit as st
 import json
 import pandas as pd
 import os
-import uuid  # For unique chat session IDs
+import uuid
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONFIGURATION (Must be the first Streamlit command) ---
 st.set_page_config(
     layout="wide", 
     page_title="Epic Research AI Assistant",
@@ -13,131 +13,110 @@ st.set_page_config(
 
 STORAGE_FILE = "user_data.json"
 
-# --- 2. DATA LOADING ---
+# --- 2. DATA LOADING & STORAGE REPAIR ---
 @st.cache_data
 def load_data():
-    with open("epic_tables_parsed.json", "r", encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        with open("epic_tables_parsed.json", "r", encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        st.error("Data file 'epic_tables_parsed.json' not found.")
+        return []
+
 def load_user_data():
+    defaults = {"favorites": [], "history": [], "chat_sessions": {}}
     if os.path.exists(STORAGE_FILE):
         with open(STORAGE_FILE, "r") as f:
             try:
                 data = json.load(f)
-                # --- REPAIR LOGIC START ---
-                # If the file exists but is missing new keys, add them here
-                if "favorites" not in data:
-                    data["favorites"] = []
-                if "history" not in data:
-                    data["history"] = []
-                if "chat_sessions" not in data:
-                    data["chat_sessions"] = {}
-                # --- REPAIR LOGIC END ---
+                # Repair missing keys if migrating from older versions
+                for key in defaults:
+                    if key not in data:
+                        data[key] = defaults[key]
                 return data
             except json.JSONDecodeError:
-                # If the file is corrupted, return default
-                return {"favorites": [], "history": [], "chat_sessions": {}}
-    return {"favorites": [], "history": [], "chat_sessions": {}}
+                return defaults
+    return defaults
 
 def save_user_data(data_to_save):
     with open(STORAGE_FILE, "w") as f:
         json.dump(data_to_save, f)
 
+# Initialize Data
 data = load_data()
 table_list = sorted([t['tableName'] for t in data])
 user_data = load_user_data()
 table_descriptions = {t['tableName']: t.get('description', 'No description available.') for t in data}
 
-# --- 3. SESSION STATE INITIALIZATION ---
+# --- 3. CRITICAL SESSION STATE INITIALIZATION (Prevents KeyErrors) ---
 if 'active_page' not in st.session_state:
     st.session_state['active_page'] = "Table Explorer"
+
+if 'current_table' not in st.session_state:
+    st.session_state['current_table'] = table_list[0] if table_list else None
+
+if 'sb_key_count' not in st.session_state:
+    st.session_state['sb_key_count'] = 0
+
 if 'current_chat_id' not in st.session_state:
-    # Use the repaired user_data from the function above
-    if user_data.get("chat_sessions"):
+    if user_data["chat_sessions"]:
         st.session_state['current_chat_id'] = list(user_data["chat_sessions"].keys())[0]
     else:
-        # Create a default session if absolutely none exist
-        import uuid
         new_id = str(uuid.uuid4())
         user_data["chat_sessions"][new_id] = {"name": "New Research Chat", "messages": []}
         st.session_state['current_chat_id'] = new_id
         save_user_data(user_data)
 
-# --- 4. NAVIGATION & CHAT MANAGEMENT ---
-st.sidebar.title("🧭 Navigation")
-c_nav1, c_nav2 = st.sidebar.columns(2)
-
-if c_nav1.button("Explorer", type="primary" if st.session_state['active_page'] == "Table Explorer" else "secondary", use_container_width=True):
-    st.session_state['active_page'] = "Table Explorer"
-    st.rerun()
-
-if c_nav2.button("RAG Chat", type="primary" if st.session_state['active_page'] == "RAG Model" else "secondary", use_container_width=True):
-    st.session_state['active_page'] = "RAG Model"
-    st.rerun()
-
-# Sidebar: Chat Session Management
-if st.session_state['active_page'] == "RAG Model":
-    st.sidebar.divider()
-    st.sidebar.header("💬 Chat Sessions")
-    
-    if st.sidebar.button("➕ Create New Chat", use_container_width=True):
-        new_id = str(uuid.uuid4())
-        user_data["chat_sessions"][new_id] = {"name": f"Chat {len(user_data['chat_sessions'])+1}", "messages": []}
-        st.session_state['current_chat_id'] = new_id
-        save_user_data(user_data)
-        st.rerun()
-
-    # List available chats
-    for chat_id, info in list(user_data["chat_sessions"].items()):
-        cols = st.sidebar.columns([0.8, 0.2])
-        is_current = (chat_id == st.session_state['current_chat_id'])
-        
-        if cols[0].button(info["name"], key=f"select_{chat_id}", type="primary" if is_current else "secondary", use_container_width=True):
-            st.session_state['current_chat_id'] = chat_id
-            st.rerun()
-            
-        if cols[1].button("🗑️", key=f"del_chat_{chat_id}"):
-            del user_data["chat_sessions"][chat_id]
-            if not user_data["chat_sessions"]: # Ensure at least one exists
-                new_id = str(uuid.uuid4())
-                user_data["chat_sessions"][new_id] = {"name": "New Research Chat", "messages": []}
-                st.session_state['current_chat_id'] = new_id
-            elif st.session_state['current_chat_id'] == chat_id:
-                st.session_state['current_chat_id'] = list(user_data["chat_sessions"].keys())[0]
-            save_user_data(user_data)
-            st.rerun()
-
-# Helper for Explorer navigation
+# --- 4. NAVIGATION HELPERS ---
 def set_table(table_name):
+    """Updates table selection and logs to history."""
     st.session_state['current_table'] = table_name
-    if 'sb_key_count' not in st.session_state: st.session_state['sb_key_count'] = 0
     st.session_state['sb_key_count'] += 1
     if not user_data["history"] or user_data["history"][-1] != table_name:
         user_data["history"].append(table_name)
+        user_data["history"] = user_data["history"][-50:] # Limit history size
         save_user_data(user_data)
 
+# --- 5. SIDEBAR NAVIGATION BUTTONS ---
+st.sidebar.title("🧭 Navigation")
+col_nav1, col_nav2 = st.sidebar.columns(2)
+
+if col_nav1.button("Explorer", 
+                   type="primary" if st.session_state['active_page'] == "Table Explorer" else "secondary",
+                   use_container_width=True):
+    st.session_state['active_page'] = "Table Explorer"
+    st.rerun()
+
+if col_nav2.button("RAG Chat", 
+                   type="primary" if st.session_state['active_page'] == "RAG Model" else "secondary",
+                   use_container_width=True):
+    st.session_state['active_page'] = "RAG Model"
+    st.rerun()
+
 # ==========================================
-# PAGE 1: TABLE EXPLORER
+# PAGE: TABLE EXPLORER
 # ==========================================
 if st.session_state['active_page'] == "Table Explorer":
     st.sidebar.divider()
     st.sidebar.header("📂 Table Selection")
 
+    # Safety lookup for index
     try:
-        current_index = table_list.index(st.session_state['current_table'])
-    except ValueError:
-        current_index = 0
+        current_idx = table_list.index(st.session_state['current_table'])
+    except (ValueError, KeyError):
+        current_idx = 0
 
     selected_table_name = st.sidebar.selectbox(
         "Select a table to explore:", 
         table_list, 
-        index=current_index,
+        index=current_idx,
         key=f"sb_version_{st.session_state['sb_key_count']}"
     )
 
     if selected_table_name != st.session_state['current_table']:
         set_table(selected_table_name)
 
-    # Favorites & History (Sidebar)
+    # Sidebar: Favorites
     st.sidebar.divider()
     st.sidebar.header("⭐️ Favorites")
     if user_data["favorites"]:
@@ -151,13 +130,13 @@ if st.session_state['active_page'] == "Table Explorer":
                 save_user_data(user_data)
                 st.rerun()
                 
+    # Sidebar: History
     st.sidebar.divider()
     st.sidebar.header("🕒 History")
     if user_data["history"]:
         recent = list(dict.fromkeys(reversed(user_data["history"])))[:10]
         for hist in recent:
-            desc = table_descriptions.get(hist, "No description available.")
-            if st.sidebar.button(f"↩️ {hist}", key=f"hist_nav_{hist}", help=desc):
+            if st.sidebar.button(f"↩️ {hist}", key=f"hist_nav_{hist}", help=table_descriptions.get(hist)):
                 set_table(hist)
                 st.rerun()
         if st.sidebar.button("🗑️ Clear History", use_container_width=True):
@@ -165,8 +144,9 @@ if st.session_state['active_page'] == "Table Explorer":
             save_user_data(user_data)
             st.rerun()
 
-    # Main Area Content
+    # --- MAIN CONTENT ---
     table_obj = next((t for t in data if t['tableName'] == st.session_state['current_table']), None)
+    
     if table_obj:
         c1, c2 = st.columns([0.8, 0.2])
         with c1:
@@ -183,10 +163,12 @@ if st.session_state['active_page'] == "Table Explorer":
             st.info(f"**Description:** {table_obj['description']}")
 
         tab1, tab2 = st.tabs(["📋 Columns & Keys", "🔗 Relationship Explorer"])
+        
         with tab1:
             if table_obj.get('primaryKey'):
                 st.subheader("Primary Keys")
                 st.table(pd.DataFrame(table_obj['primaryKey']))
+            
             col_df = pd.DataFrame(table_obj['columns'])
             if not col_df.empty:
                 st.subheader("All Columns")
@@ -209,54 +191,78 @@ if st.session_state['active_page'] == "Table Explorer":
                             r_cols[i % 3].button(r_table, key=f"rel_{col_name}_{r_table}", on_click=set_table, args=(r_table,), help=table_descriptions.get(r_table))
 
 # ==========================================
-# PAGE 2: RAG MODEL (CHAT FORMAT)
+# PAGE: RAG MODEL (CHAT)
 # ==========================================
 elif st.session_state['active_page'] == "RAG Model":
+    # Sidebar: Chat Sessions
+    st.sidebar.divider()
+    st.sidebar.header("💬 Chat Sessions")
+    
+    if st.sidebar.button("➕ New Research Chat", use_container_width=True):
+        new_id = str(uuid.uuid4())
+        user_data["chat_sessions"][new_id] = {"name": "New Chat", "messages": []}
+        st.session_state['current_chat_id'] = new_id
+        save_user_data(user_data)
+        st.rerun()
+
+    for chat_id, info in list(user_data["chat_sessions"].items()):
+        cols = st.sidebar.columns([0.8, 0.2])
+        if cols[0].button(info["name"], key=f"sel_{chat_id}", type="primary" if chat_id == st.session_state['current_chat_id'] else "secondary", use_container_width=True):
+            st.session_state['current_chat_id'] = chat_id
+            st.rerun()
+        if cols[1].button("🗑️", key=f"del_{chat_id}"):
+            del user_data["chat_sessions"][chat_id]
+            if not user_data["chat_sessions"]:
+                new_id = str(uuid.uuid4())
+                user_data["chat_sessions"][new_id] = {"name": "New Chat", "messages": []}
+                st.session_state['current_chat_id'] = new_id
+            elif st.session_state['current_chat_id'] == chat_id:
+                st.session_state['current_chat_id'] = list(user_data["chat_sessions"].keys())[0]
+            save_user_data(user_data)
+            st.rerun()
+
+    # --- CHAT INTERFACE ---
     curr_chat = user_data["chat_sessions"][st.session_state['current_chat_id']]
-    
     st.title(f"🤖 Research AI: {curr_chat['name']}")
-    
-    # Display Chat History
+
+    # Display History
     for message in curr_chat["messages"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            if "tables" in message:
-                cols = st.columns(len(message["tables"]))
+            if "tables" in message and message["tables"]:
+                st.write("**Related Tables:**")
+                t_cols = st.columns(len(message["tables"]))
                 for idx, t_name in enumerate(message["tables"]):
-                    if cols[idx].button(f"🔍 {t_name}", key=f"msg_nav_{t_name}_{uuid.uuid4()}"):
+                    if t_cols[idx].button(f"🔍 {t_name}", key=f"chat_nav_{t_name}_{uuid.uuid4()}"):
                         set_table(t_name)
                         st.session_state['active_page'] = "Table Explorer"
                         st.rerun()
 
     # Chat Input
-    if prompt := st.chat_input("Ask about a research topic..."):
-        # Add User Message
+    if prompt := st.chat_input("What clinical data are you looking for?"):
         curr_chat["messages"].append({"role": "user", "content": prompt})
         
-        # RAG Logic (Simple Keyword Matcher)
-        found_tables = []
+        # Keyword-based RAG matching
         words = [w.lower() for w in prompt.split() if len(w) > 3]
+        matches = []
         for t in data:
             if any(word in t['description'].lower() or word in t['tableName'].lower() for word in words):
-                found_tables.append(t['tableName'])
+                matches.append(t['tableName'])
         
-        # Build Response
-        top_tables = found_tables[:3]
-        if top_tables:
-            response = f"Based on your query, I found {len(found_tables)} relevant tables. Here are the top matches that might contain your variables:"
+        top_matches = matches[:3]
+        if top_matches:
+            ai_response = f"I found {len(matches)} tables related to your request. Here are the most relevant ones to explore:"
         else:
-            response = "I couldn't find a direct match for those terms. Try describing the clinical event (e.g., 'medication orders' or 'vitals')."
-        
-        # Add AI Message
+            ai_response = "I couldn't find a direct table match. Could you try describing the data differently (e.g., 'vitals', 'lab results', or 'patient demographics')?"
+
         curr_chat["messages"].append({
             "role": "assistant", 
-            "content": response,
-            "tables": top_tables
+            "content": ai_response,
+            "tables": top_matches
         })
-        
-        # Auto-update Chat Name if it's the first message
+
         if len(curr_chat["messages"]) <= 2:
-            curr_chat["name"] = (prompt[:25] + '...') if len(prompt) > 25 else prompt
+            curr_chat["name"] = (prompt[:30] + "...") if len(prompt) > 30 else prompt
             
         save_user_data(user_data)
         st.rerun()
