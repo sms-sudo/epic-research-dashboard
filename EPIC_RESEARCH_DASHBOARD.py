@@ -226,14 +226,29 @@ elif st.session_state['active_page'] == "RAG Model":
     st.title(f"🤖 Research AI: {curr_chat['name']}")
 
     # Display History
+# --- Find this section inside the RAG Model loop ---
     for message in curr_chat["messages"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            
+            # Check if this message has table suggestions attached
             if "tables" in message and message["tables"]:
                 st.write("**Related Tables:**")
+                
+                # Create columns for the suggestion buttons
                 t_cols = st.columns(len(message["tables"]))
+                
                 for idx, t_name in enumerate(message["tables"]):
-                    if t_cols[idx].button(f"🔍 {t_name}", key=f"chat_nav_{t_name}_{uuid.uuid4()}"):
+                    # 1. Look up the description for the hover tooltip
+                    # Using .get() ensures it won't crash if a name is missing
+                    hover_text = table_descriptions.get(t_name, "No description available.")
+                    
+                    # 2. Apply the 'help' parameter to show the description on hover
+                    if t_cols[idx].button(
+                        f"🔍 {t_name}", 
+                        key=f"chat_nav_{t_name}_{uuid.uuid4()}",
+                        help=hover_text  # This creates the hover tooltip
+                    ):
                         set_table(t_name)
                         st.session_state['active_page'] = "Table Explorer"
                         st.rerun()
