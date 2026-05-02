@@ -80,16 +80,28 @@ if user_data["favorites"]:
             user_data["favorites"].remove(fav)
             save_user_data(user_data)
             st.rerun()
-
+            
 st.sidebar.divider()
 st.sidebar.header("🕒 History")
 if user_data["history"]:
-    recent = list(dict.fromkeys(reversed(user_data["history"])))[:5]
+    # 1. Get unique history items in reverse order (most recent first)
+    # This prevents the same table from showing up multiple times in a row
+    recent = list(dict.fromkeys(reversed(user_data["history"])))[:10]
+    
     for hist in recent:
-        # Added hover description to history buttons
-        if st.sidebar.button(f"↩️ {hist}", key=f"hist_nav_{hist}", help=table_descriptions.get(hist)):
+        # Hover description included for convenience
+        desc = table_descriptions.get(hist, "No description available.")
+        if st.sidebar.button(f"↩️ {hist}", key=f"hist_nav_{hist}", help=desc):
             set_table(hist)
             st.rerun()
+    
+    # 2. The Clear History Button
+    if st.sidebar.button("🗑️ Clear History", use_container_width=True):
+        user_data["history"] = []   # Reset the list
+        save_user_data(user_data)   # Save the empty list to user_data.json
+        st.rerun()                  # Refresh UI to remove buttons
+else:
+    st.sidebar.write("History is empty.")
 
 # --- MAIN AREA ---
 table_obj = next((t for t in data if t['tableName'] == st.session_state['current_table']), None)
