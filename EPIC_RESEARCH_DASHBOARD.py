@@ -3,6 +3,13 @@ import json
 import pandas as pd
 import os
 
+# 'initial_sidebar_state="expanded"' helps ensure users see the new menu.
+st.set_page_config(
+    layout="wide", 
+    page_title="Epic Research Schema Explorer",
+    initial_sidebar_state="expanded" 
+)
+
 # Set page to wide mode
 st.set_page_config(layout="wide", page_title="Epic Research Schema Explorer")
 
